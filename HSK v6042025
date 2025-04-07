@@ -37,13 +37,38 @@ factor = 0.50
 #Concateno el archivo actual de comisiones con los años anteriores para comparativas
 Final_de_comisiones = pd.concat([Final_de_Comisiones_Actual, Final_de_Comisiones_LY], ignore_index=True)
 Final_de_comisiones.size
-# Imprimir valores únicos de la columna 'STATUS'
-print("Valores únicos en la columna 'STATUS':")
-print(Final_de_comisiones['STATUS'].unique())
 
-# Imprimir valores únicos de la columna 'OCUPACIÓN'
-print("Valores únicos en la columna 'OCUPACIÓN':")
-print(Final_de_comisiones['OCUPACIÓN'].unique())
+#obtener la rotacion
+# Convertir la columna 'Año' a valores numéricos
+Bajas_Acumulado['Año'] = pd.to_numeric(Bajas_Acumulado['Año'], errors='coerce')
+
+# Verificar el resultado
+print(Bajas_Acumulado['Año'])
+rotacion = Bajas_Acumulado.groupby(['NUMERO DE PROVEEDOR', 'Año', 'Mes']).size().reset_index(name='rotacion')
+# Crear una nueva columna 'Año_LY' con el valor de 'Año' menos 1
+
+Bajas_Acumulado['Año_LY'] = Bajas_Acumulado['Año'] - 1
+# Usar 'Año_LY' en el groupby
+rotacion_ly = Bajas_Acumulado.groupby(['NUMERO DE NEGOCIO', 'Año_LY', 'Mes']).size().reset_index(name='rotacion_ly')
+
+# Hacer merge de 'rotacion' con 'Data'
+Data = Data.merge(rotacion, how='left', left_on=['# SK', 'Año', 'Mes'], right_on=['NUMERO DE PROVEEDOR', 'Año', 'Mes'])
+
+# Hacer merge de 'rotacion_ly' con 'Data'
+Data = Data.merge(rotacion_ly, how='left', left_on=['CeCo', 'Año', 'Mes'], right_on=['NUMERO DE NEGOCIO', 'Año_LY', 'Mes'])
+
+# Renombrar las columnas en Data si es necesario
+Data.rename(columns={'rotacion': 'BAJA', 'rotacion_ly': 'BAJA LY'}, inplace=True)
+
+# Verificar el resultado
+print(Data[['BAJA', 'BAJA LY']])
+# Eliminar las columnas 'NUMERO DE PROVEEDOR' y 'NUMERO DE NEGOCIO' de Data
+Data = Data.drop(columns=['NUMERO DE PROVEEDOR', 'NUMERO DE NEGOCIO'], errors='ignore')
+
+# Verificar que las columnas se hayan eliminado
+print(Data.columns)
+
+Data.to_excel('copia_datarotacion.xlsx', index=False)
 
 #Columnas verdes en OP_Acumulado
 OP_Acumulado['Ingreso Cerveza'] = pd.to_numeric(OP_Acumulado['Ingreso Cerveza'], errors='coerce')
@@ -63,8 +88,11 @@ except ZeroDivisionError:
         print("Error: División por cero detectada. Revisa los valores en 'Ingreso Cerveza' o 'Volumen Sell Out (Hlts)'.")
 
 #Hoja Data, del excel de HSK (Acumulado_Data 1)
-#aca inician las 40 columnas de la hoja 
-
+# Convertir la columna 'Año' a valores numéricos
+Bajas_Acumulado['Año'] = pd.to_numeric(Bajas_Acumulado['Año'], errors='coerce')
+Bajas_Acumulado['Año_LY'] = Bajas_Acumulado['Año'] - 1
+# Verificar el resultado
+print(Bajas_Acumulado['Año'])
 # Función para verificar si existe una coincidencia en Bajas_Acumulado
 def status_comision_mes(row):
     match = (
@@ -86,7 +114,7 @@ def ocupacion_comision_mes(row):
     match = (
         (Final_de_comisiones['NoDEPROVEEDOR'] == row['# SK']) &
         (Final_de_comisiones['Mes_x'] == row['Mes']) &
-        (Final_de_comisiones['Año_Comision'] == row['Año'])
+        (Final_de_comisiones['Año_Comision'] == row['Año_LY'])
     )
     if match.any():
         ocupacion_values = Final_de_comisiones.loc[match, 'OCUPACIÓN'].values
@@ -95,7 +123,7 @@ def ocupacion_comision_mes(row):
     return 'BAJAS'
 # Aplicar la función fila por fila
 Data['Ocupacion Comision'] = Data.apply(ocupacion_comision_mes, axis=1)
-
+Data.to_excel('copia_data_status.xlsx', index=False)
 #Agregar columnas a OP Acumulado (rep09)Columna OP'
 
 def col_op(row):
@@ -534,7 +562,7 @@ print(Data['Fijos AD Al'])
 
 #Columna OP Line
 def custom_formula(row):
-    if row['Status Comision'] == 'ACTIVOS' and row['Ocupacion Comisión'] == 'TOTAL':
+    if row['Status Comision'] == 'ACTIVOS' and row['Ocupacion Comision'] == 'TOTAL':
         return row['OP'] - row['Fijos ad'] + row['Fijos AD Al']
     else:
         return 0
