@@ -1,0 +1,573 @@
+import pandas as pd
+import numpy as np
+import time
+
+
+start_time = time.time()
+#Archivos
+
+#el acumulado del rep9 desde 2022 a futurp
+ruta_OP_AY = r'/Users/handom/Documents/SIX HSK/Data y OP acumulados.xlsx'
+#el listado de todas hsk desde 2023, con su rotación AY y LY
+ruta_Data = r'/Users/handom/Documents/SIX HSK/Acumulado_Data.xlsx'
+#Listado de tiendas que vamos a evaluar HSK
+
+#####esta trae las tiendas que vamos a evaluar FALTA ACTUALIZARLO
+ruta_listado_HSK = r'/Users/handom/Documents/SIX HSK/HSK Historico.xlsx'
+
+# Final de comisiones del año en curso
+ruta_final_de_comisiones_AY = r'/Users/handom/Documents/SIX Comisiones/Base_Comisiones/Archivo final de comisiones/Base_Final_Comisiones_2025.xlsx'
+#Final de comisiones del LY
+ruta_final_de_comisiones_LY = r'/Users/handom/Documents/SIX Comisiones/Base_Comisiones/Archivo final de comisiones/Base_Final_Comisiones_2024.xlsx'
+
+# Leer archivos 
+OP_Acumulado = pd.read_excel(ruta_OP_AY,sheet_name='OP Acumulado')
+Data = pd.read_excel(ruta_OP_AY, sheet_name='DATA')
+Bajas_Acumulado = pd.read_excel(ruta_Data, sheet_name='Bajas')
+Hoja_TGT = pd.read_excel(ruta_listado_HSK)
+Final_de_Comisiones_Actual = pd.read_excel(ruta_final_de_comisiones_AY)
+Final_de_Comisiones_LY = pd.read_excel(ruta_final_de_comisiones_LY)
+# Combinar los DataFrames ignorando los índices originales
+Final_de_comisiones = pd.concat([Final_de_Comisiones_Actual, Final_de_Comisiones_LY], ignore_index=True)
+
+#Variables
+cerveza = 0.62
+factor = 0.50
+
+#Concateno el archivo actual de comisiones con los años anteriores para comparativas
+Final_de_comisiones = pd.concat([Final_de_Comisiones_Actual, Final_de_Comisiones_LY], ignore_index=True)
+Final_de_comisiones.size
+# Imprimir valores únicos de la columna 'STATUS'
+print("Valores únicos en la columna 'STATUS':")
+print(Final_de_comisiones['STATUS'].unique())
+
+# Imprimir valores únicos de la columna 'OCUPACIÓN'
+print("Valores únicos en la columna 'OCUPACIÓN':")
+print(Final_de_comisiones['OCUPACIÓN'].unique())
+
+#Columnas verdes en OP_Acumulado
+OP_Acumulado['Ingreso Cerveza'] = pd.to_numeric(OP_Acumulado['Ingreso Cerveza'], errors='coerce')
+OP_Acumulado['Comisión (Cerveza)'] = pd.to_numeric(OP_Acumulado['Comisión (Cerveza)'], errors='coerce')
+OP_Acumulado['Volumen Sell Out (Hlts)'] = pd.to_numeric(OP_Acumulado['Volumen Sell Out (Hlts)'], errors='coerce')
+
+#Columnas verdes en OP_Acumulado
+#Agregar columnas a OP Acumulado (rep09)
+try:
+    OP_Acumulado['% Comisión'] = OP_Acumulado['Comisión (Cerveza)'] / OP_Acumulado['Ingreso Cerveza'].replace(0, np.nan)
+    OP_Acumulado['Costo cerveza'] = OP_Acumulado['Ingreso Cerveza'] * cerveza
+    OP_Acumulado['GP Beer'] = OP_Acumulado['Ingreso Cerveza'] + OP_Acumulado['Comisión (Cerveza)'] - OP_Acumulado['Costo cerveza']
+    OP_Acumulado['GP Cerveza'] = OP_Acumulado['GP Beer'] / OP_Acumulado['Ingreso Cerveza'].replace(0, np.nan)
+    OP_Acumulado['Costo HTL'] = OP_Acumulado['GP Beer'] / OP_Acumulado['Volumen Sell Out (Hlts)'].replace(0, np.nan)
+
+except ZeroDivisionError:
+        print("Error: División por cero detectada. Revisa los valores en 'Ingreso Cerveza' o 'Volumen Sell Out (Hlts)'.")
+
+#Hoja Data, del excel de HSK (Acumulado_Data 1)
+#aca inician las 40 columnas de la hoja 
+
+# Función para verificar si existe una coincidencia en Bajas_Acumulado
+def status_comision_mes(row):
+    match = (
+        (Final_de_comisiones['NoDEPROVEEDOR'] == row['# SK']) &
+        (Final_de_comisiones['Mes_x'] == row['Mes']) &
+        (Final_de_comisiones['Año_Comision'] == row['Año'])
+    )
+
+    if match.any():
+        status_values = Final_de_comisiones.loc[match, 'STATUS'].values
+        return status_values[0] if len(status_values) > 0 else 'PARCIAL'  # Evitar IndexError
+    
+    return 'PARCIAL'
+
+# Aplicar la función fila por fila
+Data['Status Comision'] = Data.apply(status_comision_mes, axis=1)
+
+def ocupacion_comision_mes(row):
+    match = (
+        (Final_de_comisiones['NoDEPROVEEDOR'] == row['# SK']) &
+        (Final_de_comisiones['Mes_x'] == row['Mes']) &
+        (Final_de_comisiones['Año_Comision'] == row['Año'])
+    )
+    if match.any():
+        ocupacion_values = Final_de_comisiones.loc[match, 'OCUPACIÓN'].values
+        return ocupacion_values[0] if len(ocupacion_values) > 0 else 'BAJAS'  # Evitar IndexError
+    
+    return 'BAJAS'
+# Aplicar la función fila por fila
+Data['Ocupacion Comision'] = Data.apply(ocupacion_comision_mes, axis=1)
+
+#Agregar columnas a OP Acumulado (rep09)Columna OP'
+
+def col_op(row):
+    if row['Status Comision'] == 'ACTIVOS' and row['Ocupacion Comision'] == 'TOTAL':
+        if row['# SK'] > 1:
+            filtered_data = OP_Acumulado[
+                (OP_Acumulado['CECO'] == row['CeCo']) &
+                (OP_Acumulado['MES COM OP'] == row['Mes']) &
+                (OP_Acumulado['Año'] == row['Año'])
+            ]
+            if not filtered_data.empty:
+                return filtered_data['EBIT'].mean()
+            else:
+                return 0
+        else:
+            return 0
+    else:
+        return 0
+
+# Aplicar la función cada fila
+Data['OP'] = Data.apply(col_op, axis=1)
+print(Data['OP'])
+ 
+suma_op = Data['OP'].sum()
+print(f"La suma de la columna 'OP' es: {suma_op}")
+
+#Columna LY 
+Data['LY'] = Data['Año'] - 1 
+
+
+#Columna OP LY 
+def op_ly(row):
+    if row['Status Comision'] == 'ACTIVOS' and row['Ocupacion Comision'] == 'TOTAL':
+        if row['# SK'] > 1:
+            filtered_data = OP_Acumulado[
+                (OP_Acumulado['CECO'] == row['CeCo']) &
+                (OP_Acumulado['MES COM OP'] == row['Mes']) &
+                (OP_Acumulado['Año'] == row['LY'])
+            ]
+            if not filtered_data.empty:
+                return filtered_data['EBIT'].mean()
+            else:
+                return 0
+        else:
+            return 0
+    else:
+        return 0
+
+# Aplicar la función a cada fila
+Data['OP LY'] = Data.apply(op_ly, axis=1)
+suma_op_ly = Data['OP LY'].sum()
+print(f"La suma de la columna 'OP LY' es: {suma_op_ly}")
+
+#Columna Var vs LY
+def var_ly(row):
+    if row['Status Comision'] == 'ACTIVOS' and row['Ocupacion Comision'] == 'TOTAL':
+        if row['# SK'] > 1:
+            filtered_data = OP_Acumulado[
+                (OP_Acumulado['CECO'] == row['CeCo']) &
+                (OP_Acumulado['MES COM OP'] == row['Mes']) &
+                (OP_Acumulado['Año'] == row['LY'])
+            ]
+            if not filtered_data.empty:
+                return filtered_data['EBIT'].mean()
+            else:
+                return 0
+        else:
+            return 0
+    else:
+        return 0
+
+# Aplicar la función a cada fila
+Data['Var vs LY'] = Data.apply(var_ly, axis=1)
+suma_Var_vs_LY = Data['Var vs LY'].sum()
+print(f"La suma de la columna 'Var vs LY es: {suma_Var_vs_LY}")
+
+print(Data['Var vs LY']) 
+
+#Columna Avg OP LY
+##Convertir la columna '# SK' a enteros, manejando posibles errores
+Data['# SK'] = pd.to_numeric(Data['# SK'], errors='coerce')
+OP_Acumulado.columns
+#Función
+def avg_op_ly(row):
+    if row['# SK'] > 1:
+        filtered_data = OP_Acumulado[
+            (OP_Acumulado['CECO'] == row['CeCo']) &
+            (OP_Acumulado['Año'] == row['LY'])
+        ]
+        if not filtered_data.empty:
+            return filtered_data['EBIT'].mean()
+        else:
+            return 0
+    else:
+        return 0
+
+# Aplicar la función  a cada fila
+Data['Avg OP LY'] = Data.apply(avg_op_ly, axis=1)
+print(Data['Avg OP LY'])
+
+#Columna Var vs Avg
+Data['Var vs Avg'] = np.where(
+    Data['Avg OP LY'] != 0,
+    (Data['OP'] / Data['Avg OP LY']) - 1,
+    0)
+print(Data['Var vs Avg'])
+
+#Columna Vol Sell OUT Programa
+def sumifs_vol_sellout_prog(row):
+    filtered_data = OP_Acumulado[
+        (OP_Acumulado['CECO'] == row['CeCo']) &
+        (OP_Acumulado['MES COM OP'] == row['Mes']) &
+        (OP_Acumulado['Año'] == row['Año'])
+    ]
+    return filtered_data['Volumen Sell Out (Hlts)'].sum()
+
+# Aplicar la función a cada fila
+Data['Vol Sell OUT Programa'] = Data.apply(sumifs_vol_sellout_prog, axis=1)
+print(Data['Vol Sell OUT Programa'])
+
+#Columna Vol Sell OUT LY
+def sumifs_vol_sellout_ly(row):
+    filtered_data = OP_Acumulado[
+        (OP_Acumulado['CECO'] == row['CeCo']) &
+        (OP_Acumulado['MES COM OP'] == row['Mes']) &
+        (OP_Acumulado['Año'] == row['LY'])
+    ]
+    return filtered_data['Volumen Sell Out (Hlts)'].sum()
+ 
+# Aplicar la función a cada fila
+Data['Vol Sell OUT LY'] = Data.apply(sumifs_vol_sellout_ly, axis=1)
+print(Data['Vol Sell OUT LY'])
+
+#Columna Var
+Data['Var Sell Out'] = np.where(
+    Data['Vol Sell OUT LY'] != 0,
+    (Data['Vol Sell OUT Programa']/ Data['Vol Sell OUT LY']) - 1,
+    0
+)
+
+#Columna Ingreso Cerveza Prog
+def sumifs_ing_cer_prog(row):
+    filtered_data = OP_Acumulado[
+        (OP_Acumulado['CECO'] == row['CeCo']) &
+        (OP_Acumulado['MES COM OP'] == row['Mes']) &
+        (OP_Acumulado['Año'] == row['Año'])
+    ]
+    return filtered_data['Ingreso Cerveza'].sum()
+
+# Aplicar la función a cada fila
+Data['Ingreso Cerveza Prog'] = Data.apply(sumifs_ing_cer_prog, axis=1)
+print(Data['Ingreso Cerveza Prog'])
+
+#Columna Ingreso Cerveza LY
+def sumifs_ing_cer_ly(row):
+    filtered_data = OP_Acumulado[
+        (OP_Acumulado['CECO'] == row['CeCo']) &
+        (OP_Acumulado['MES COM OP'] == row['Mes']) &
+        (OP_Acumulado['Año'] == row['LY'])
+    ]
+    return filtered_data['Ingreso Cerveza'].sum()
+
+# Aplicar la función a cada fila
+Data['Ingreso Cerveza LY'] = Data.apply(sumifs_ing_cer_ly, axis=1)
+print(Data['Ingreso Cerveza LY'])
+
+#Columna Var
+Data['Var Cerveza'] = np.where(
+    Data['Ingreso Cerveza LY'] != 0,
+    (Data['Ingreso Cerveza Prog']/ Data['Ingreso Cerveza LY']) - 1,
+    0
+)
+
+#Columna 'Comisión (Cerveza) Prog
+def sumifs_com_cer_prog(row):
+    # Filtrar los datos en OP_Acumulado según las condiciones
+    filtered_data = OP_Acumulado[
+        (OP_Acumulado['CECO'] == row['CeCo']) &
+        (OP_Acumulado['MES COM OP'] == row['Mes']) &
+        (OP_Acumulado['Año'] == row['Año'])
+    ]
+    # Sumar la columna 'Comisión (Cerveza)' en los datos filtrados
+    return filtered_data['Comisión (Cerveza)'].sum()
+
+# Aplicar la función a cada fila de Data y crear la nueva columna
+Data['Comisión (Cerveza) Prog'] = Data.apply(sumifs_com_cer_prog, axis=1)
+
+# Mostrar la nueva columna
+print(Data['Comisión (Cerveza) Prog'])
+
+#Columna Comisión (Cerveza) LY
+def sumifs_com_cer_ly(row):
+    filtered_data = OP_Acumulado[
+        (OP_Acumulado['CECO'] == row['CeCo']) &
+        (OP_Acumulado['MES COM OP'] == row['Mes']) &
+        (OP_Acumulado['Año'] == row['LY'])
+    ]
+    return filtered_data['Comisión (Cerveza)'].sum()
+
+# Aplicar la función a cada fila
+Data['Comisión (Cerveza) LY'] = Data.apply(sumifs_com_cer_ly, axis=1)
+print(Data['Comisión (Cerveza) LY'])
+
+#Columna Var
+Data['Var LY Prog'] = np.where(
+    Data['Comisión (Cerveza) LY'] != 0,
+    (Data['Comisión (Cerveza) Prog']/ Data['Comisión (Cerveza) LY']) - 1,
+    0
+)
+
+
+#Columnas verdes en Data
+#Columna % Comisión
+def if_error_comision(row):
+    if row['Ingreso Cerveza Prog'] != 0:
+        return row['Comisión (Cerveza) Prog'] / row['Ingreso Cerveza Prog']
+    else:
+        return 0
+
+##Aplicar la función a cada fila
+Data['% Comisión'] = Data.apply(if_error_comision, axis=1)
+print(Data['% Comisión'])
+
+#Columna .Costo cerveza
+Data['Costo cerveza'] = Data['Ingreso Cerveza Prog'] * cerveza
+print(Data['Costo cerveza'])
+
+#Columna .GP Beer
+Data['GP Beer'] = Data['Ingreso Cerveza Prog'] + Data['Comisión (Cerveza) LY'] - Data['Costo cerveza']
+print(Data['GP Beer'])
+
+#Columna % GP Cerveza
+Data['% GP Cerveza'] = np.where(
+    Data['Ingreso Cerveza Prog'] != 0,
+    (Data['GP Beer']/ Data['Ingreso Cerveza Prog']),
+    0
+)
+print(Data['% GP Cerveza'])
+
+#Columna Costo HTL
+def if_error_costo_htl(row):
+    if row['Ingreso Cerveza Prog'] != 0 and row['Vol Sell OUT Programa'] != 0:
+        return row['GP Beer'] / row['Vol Sell OUT Programa']
+    else:
+        return 0
+
+# Aplicar la función a cada fila
+Data['Costo HTL'] = Data.apply(if_error_costo_htl, axis=1)
+print(Data['Costo HTL'])
+
+#Se terminan las columnas verdes
+
+#Columna Rentas 
+def sumifs_rentas(row):
+    filtered_data = OP_Acumulado[
+        (OP_Acumulado['CECO'] == row['CeCo']) &
+        (OP_Acumulado['MES COM OP'] == row['Mes']) &
+        (OP_Acumulado['Año'] == row['Año'])
+    ]
+    return filtered_data['Rentas'].sum()
+
+# Aplicar la función a cada fila 
+Data['Rentas'] = Data.apply(sumifs_rentas, axis=1)
+print(Data['Rentas'])
+
+#Columna Energía y Agua 
+def sumifs_ener_agua(row):
+    filtered_data = OP_Acumulado[
+        (OP_Acumulado['CECO'] == row['CeCo']) &
+        (OP_Acumulado['MES COM OP'] == row['Mes']) &
+        (OP_Acumulado['Año'] == row['Año'])
+    ]
+    return filtered_data['Energía y Agua'].sum()
+
+# Aplicar la función a cada fila 
+Data['Energía y Agua'] = Data.apply(sumifs_ener_agua, axis=1)
+
+print(Data['Energía y Agua'])
+
+#Columna Mantenimientos
+def sumifs_mantenimientos(row):
+    filtered_data = OP_Acumulado[
+        (OP_Acumulado['CECO'] == row['CeCo']) &
+        (OP_Acumulado['MES COM OP'] == row['Mes']) &
+        (OP_Acumulado['Año'] == row['Año'])
+    ]
+    return filtered_data['Mantenimientos'].sum()
+
+# Aplicar la función a cada fila 
+Data['Mantenimientos'] = Data.apply(sumifs_mantenimientos, axis=1)
+print(Data['Mantenimientos'])
+
+#Columna Licencias y Refrendos 
+def sumifs_lic_ref(row):
+    filtered_data = OP_Acumulado[
+        (OP_Acumulado['CECO'] == row['CeCo']) &
+        (OP_Acumulado['MES COM OP'] == row['Mes']) &
+        (OP_Acumulado['Año'] == row['Año'])
+    ]
+    return filtered_data['Licencias y Refrendos'].sum()
+
+# Aplicar la función a cada fila 
+Data['Licencias y Refrendos'] = Data.apply(sumifs_lic_ref, axis=1)
+print(Data['Licencias y Refrendos'])
+
+#Columna Fijos ad
+Data['Fijos ad'] = Data['Rentas'] + Data['Energía y Agua'] + Data['Mantenimientos'] + Data['Licencias y Refrendos']
+print(Data['Fijos ad'])
+ 
+#Columna  Rentas PROM
+##Definir función para calcular promedio de columnas
+def averageifs(df, value_column, condition1_column, condition1_value, condition2_column, condition2_value):
+    filtered_df = df[(df[condition1_column] == condition1_value) & (df[condition2_column] == condition2_value)]
+    return filtered_df[value_column].mean() if not filtered_df.empty else np.nan
+
+# Aplicar la función averageifs a cada fila del DataFrame Data
+Data['Rentas PROM'] = Data.apply(
+    lambda row: averageifs(Data, 'Rentas', 'CeCo', row['CeCo'], 'Año', row['Año']),
+    axis=1
+)
+
+print(Data['Rentas PROM'])
+
+#Columna Energía PROM
+##aplicar funcion para calcular promedio de columnas 
+Data['Energía PROM'] = Data.apply(
+     lambda row: averageifs(Data, 'Energía y Agua', 'CeCo', row['CeCo'], 'Año', row['Año']),
+     axis=1
+)
+print(Data['Energía PROM'])
+
+#Columna Mantenimientos PROM
+Data['Mantenimientos PROM'] = Data.apply(
+     lambda row: averageifs(Data, 'Mantenimientos', 'CeCo', row['CeCo'], 'Año', row['Año']),
+     axis=1
+)
+print(Data['Mantenimientos PROM'])
+
+#Columna Licencias y Refrendos PROM
+Data['Licencias y Refrendos PROM'] = Data.apply(
+     lambda row: averageifs(Data, 'Licencias y Refrendos', 'CeCo', row['CeCo'], 'Año', row['Año']),
+     axis=1
+)
+print(Data['Licencias y Refrendos PROM'])
+
+#Columna Fijos AD PROM
+Data['Fijos AD PROM'] = Data.apply(
+     lambda row: averageifs(Data, 'Fijos ad', 'CeCo', row['CeCo'], 'Año', row['Año']),
+     axis=1
+)
+print(Data['Fijos AD PROM'])
+
+#Columna % Var Rentas
+def calculate_var_rentas(row):
+    try:
+        return (row['Rentas'] / row['Rentas PROM']) - 1
+    except ZeroDivisionError:
+        return 0
+
+Data['% Var Rentas'] = Data.apply(calculate_var_rentas, axis=1)
+print(Data['% Var Rentas'])
+
+#Columna % Var Energía
+def calculate_var_Energía(row):
+    try:
+        return (row['Energía y Agua'] / row['Energía PROM']) - 1
+    except ZeroDivisionError:
+        return 0
+
+Data['% Var Energía'] = Data.apply(calculate_var_Energía, axis=1)
+print(Data['% Var Energía'])
+
+#Columna % Var Mtto
+def calculate_var_mtto(row):
+    try:
+        return (row['Mantenimientos'] / row['Mantenimientos PROM']) - 1
+    except ZeroDivisionError:
+        return 0
+
+Data['% Var Mtto'] = Data.apply(calculate_var_mtto, axis=1)
+print(Data['% Var Mtto'])
+
+#Columna % LyR
+def calculate_var_lyr(row):
+    try:
+        return(row['Licencias y Refrendos'] / row['Licencias y Refrendos PROM']) -1
+    except ZeroDivisionError:
+        return 0
+    
+Data['% LyR'] = Data.apply(calculate_var_lyr, axis=1)
+print(Data['% LyR'])
+
+#Columna Rentas nvo
+def calculate_rentas_nvo(row):
+    if row['% Var Rentas'] > factor:
+        return row['Rentas PROM']
+    else:
+        return row['Rentas']
+
+Data['Rentas nvo'] = Data.apply(calculate_rentas_nvo, axis=1)
+print(Data['Rentas nvo'])
+
+#Columna Eya Nvo
+def calculate_eya_nvo(row):
+    if row['% Var Energía'] > factor:
+        return row['Energía PROM']
+    else:
+        return row['Energía y Agua']
+
+Data['Eya Nvo'] = Data.apply(calculate_eya_nvo, axis=1)
+print(Data['Eya Nvo'])
+
+#Columna Mtto Nvo
+def calculate_mtto_nvo(row):
+    if row['% Var Mtto'] > factor:
+        return row['Mantenimientos PROM']
+    else:
+        return row['Mantenimientos']
+
+Data['Mtto Nvo'] = Data.apply(calculate_mtto_nvo, axis=1)
+print(Data['Mtto Nvo'])
+
+#Columna Lic y Ref Nvo
+def calculate_lic_ref_nvo(row):
+    if row['% LyR'] > factor:
+        return row['Licencias y Refrendos PROM']
+    else:
+        return row['Licencias y Refrendos']
+
+Data['Lic y Ref Nvo'] = Data.apply(calculate_lic_ref_nvo, axis=1)
+print(Data['Lic y Ref Nvo'])
+
+#Columna Fijos AD Al
+Data['Fijos AD Al'] = Data['Rentas nvo'] + Data['Eya Nvo'] + Data['Mtto Nvo'] + Data['Lic y Ref Nvo']
+print(Data['Fijos AD Al'])			
+
+#Columna OP Line
+def custom_formula(row):
+    if row['Status Comision'] == 'ACTIVOS' and row['Ocupacion Comisión'] == 'TOTAL':
+        return row['OP'] - row['Fijos ad'] + row['Fijos AD Al']
+    else:
+        return 0
+
+Data['OP Line'] = Data.apply(custom_formula, axis=1)
+print(Data['OP Line'])
+
+# Filtro base
+filtro_comerciante_activo_y_total = (
+    (Data['Status Comision'] == "ACTIVOS") & 
+    (Data['Ocupacion Comision'] == "TOTAL") & 
+    (Data['# SK'] != 0) & 
+    (Data['# SK'] != 'VACANTE')
+)
+# Promedio EBIT con condiciones
+ebit_promedio = OP_Acumulado.groupby(['CECO', 'MES COM OP', 'Año'])['EBIT'].transform('mean')
+
+# Asignar valores según el filtro_comerciante_activo_y_total
+Hoja_TGT['Resultado'] = 0  # Default en caso de que no se cumplan condiciones
+Data.loc[filtro_comerciante_activo_y_total, 'Resultado'] = Data.loc[filtro_comerciante_activo_y_total].apply(
+    lambda row: ebit_promedio.get((row['CeCo'], row['Mes'], row['Año']), 0), axis=1
+)
+# Rellenar posibles NaN con 0
+Hoja_TGT['Resultado'] = Hoja_TGT['Resultado'].fillna(0)
+
+#Pasar a Excel
+Hoja_TGT.to_excel('copia_Hoja_TGT.xlsx', index=False)
+Data.to_excel('copia_data.xlsx', index=False)
+OP_Acumulado.to_excel('copia_OP_Acumulado.xlsx', index=False) 
+
+end_time = time.time()
+ 
+# Tiempo transcurrido
+elapsed_time = end_time - start_time
+minutes, seconds = divmod(elapsed_time, 60)
+print(f"El código tardó {int(minutes)} minutos y {seconds:.2f} segundos en ejecutarse.")
