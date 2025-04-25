@@ -1,0 +1,27 @@
+import pandas as pd
+
+# Leer los archivos Excel
+Data = pd.read_excel('copia_data.xlsx')
+OP_Acumulado = pd.read_excel('copia_OP_Acumulado.xlsx')
+ 
+# Exportar a pickle
+Data.to_pickle('copia_data.pkl')
+OP_Acumulado.to_pickle('copia_OP_Acumulado.pkl')
+
+print("Archivos exportados a formato pickle.")
+
+# Cargar los archivos de comisiones
+Final_de_Comisiones_Actual = pd.read_excel('/Users/handom/Documents/SIX Comisiones/Base_Comisiones/Archivo final de comisiones/Base_Final_Comisiones_2025.xlsx')
+Final_de_Comisiones_LY = pd.read_excel('/Users/handom/Documents/SIX Comisiones/Base_Comisiones/Archivo final de comisiones/Base_Final_Comisiones_2024.xlsx')
+Final_de_Comisiones_2023 = pd.read_excel('/Users/handom/Documents/SIX Comisiones/Base_Comisiones/Archivo final de comisiones/Base_Final_Comisiones_2023.xlsx')
+
+# Combinar los DataFrames ignorando los índices originales
+Final_de_comisiones = pd.concat([Final_de_Comisiones_Actual, Final_de_Comisiones_LY, Final_de_Comisiones_2023], ignore_index=True)
+
+# Exportar a pickle
+Final_de_Comisiones_Actual.to_pickle('/Users/handom/Documents/SIX Comisiones/Base_Comisiones/Archivo final de comisiones/Base_Final_Comisiones_2025.pkl')
+Final_de_Comisiones_LY.to_pickle('/Users/handom/Documents/SIX Comisiones/Base_Comisiones/Archivo final de comisiones/Base_Final_Comisiones_2024.pkl')
+Final_de_Comisiones_2023.to_pickle('/Users/handom/Documents/SIX Comisiones/Base_Comisiones/Archivo final de comisiones/Base_Final_Comisiones_2023.pkl')
+Final_de_comisiones.to_pickle('/Users/handom/Documents/SIX Comisiones/Base_Comisiones/Archivo final de comisiones/Final_de_comisiones_historico.pkl')
+
+print("Archivos exportados a formato pickle.")
