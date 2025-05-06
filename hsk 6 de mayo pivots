@@ -1,0 +1,548 @@
+# %%
+import pandas as pd
+import time
+
+# Definir la fecha actual
+fecha_actual = pd.to_datetime("2025-03-03")
+
+start_time = time.time()
+# Cargar el archivo Excel
+tgt = pd.read_excel('/Users/handom/Documents/SIX HSK/HSK Historico.xlsx')
+# Leer los archivos pickle
+data = pd.read_pickle('copia_data.pkl')
+OP_Acumulado = pd.read_pickle('copia_OP_Acumulado.pkl')
+# Agregar la columna concatenada
+data['Concat'] = data.apply(
+    lambda row: f"{row['Año']}-{row['Mes']}-{row['CeCo']}", axis=1
+)
+# Crear un diccionario con la columna 'CeCo' como llave y 'Tipo' como valor
+tgt_dict = tgt.set_index('CeCo')['# OLA'].to_dict()
+
+# Crear la columna 'Wave' en el DataFrame 'data' usando el diccionario 'tgt_dict'
+data['Wave'] = data['CeCo'].map(tgt_dict)
+# Reemplazar "OLA 3" por "OLA3" en la columna 'Tipo'
+tgt['Tipo'] = tgt['Tipo'].replace('OLA 3', 'OLA3')
+data['Tipo'] = data['Tipo'].replace('OLA 3', 'OLA3')
+
+# Rellenar los valores nulos en la columna 'Wave' con los valores de la columna 'Tipo'
+data['Wave'] = data['Wave'].fillna(data['Tipo'])
+# Crear la columna 'Fecha' en formato datetime usando las columnas 'Año' y 'Mes'
+data['Fecha'] = pd.to_datetime(
+    {'year': data['Año'], 'month': data['Mes'], 'day': 1},
+    errors='coerce'
+)
+
+#Final de comisiones de años anteriores
+start_time = time.time()
+
+Final_de_comisiones = pd.read_pickle('/Users/handom/Documents/SIX Comisiones/Base_Comisiones/Archivo final de comisiones/Final_de_comisiones_historico.pkl')
+
+# %%
+#creación de hoja tgt
+# Guardar ambas pivots en un solo archivo Excel con diferentes hojas
+output_file = '/Users/handom/Documents/SIX HSK/pivots_combined.xlsx'
+
+# Agrupar por Año, MES COM OP y CECO, sumando el volumen
+pivot_sellout = (
+    OP_Acumulado.groupby(['Año', 'MES PL', 'CECO'], as_index=False)['Volumen Sell Out (Hlts)']
+    .sum()
+)
+
+# Renombrar la columna para simplificar (opcional)
+pivot_sellout = pivot_sellout.rename(columns={'Volumen Sell Out (Hlts)': 'Vol_Sellout'})
+
+# Agregar la columna concatenada
+pivot_sellout['Concat'] = pivot_sellout.apply(
+    lambda row: f"{row['Año']}-{row['MES PL']}-{row['CECO']}", axis=1
+)
+
+# Agrupar por Año, MES y tienda
+pivot_total_income = (
+    Final_de_comisiones
+    .groupby(['Año_Comision', 'Mes_x', 'No.SAPDENEGOCIO'], as_index=False)['Total Income']
+    .sum()
+)
+
+# Agregar la columna concatenada
+pivot_total_income['Concat'] = pivot_total_income.apply(
+    lambda row: f"{row['Año_Comision']}-{row['Mes_x']}-{row['No.SAPDENEGOCIO']}", axis=1
+)
+with pd.ExcelWriter(output_file) as writer:
+    # Guardar la primera pivot en la hoja "Sellout"
+    pivot_sellout.to_excel(writer, sheet_name='Sellout', index=False)
+    
+    # Guardar la segunda pivot en la hoja "Total Income"
+    pivot_total_income.to_excel(writer, sheet_name='Total Income', index=False)
+
+print(f"Pivots guardadas en el archivo: {output_file}")
+
+# %% [markdown]
+# # Creacion de BBDD
+# # #validar lo de las tiendas que no son status activo y ocupacion total
+
+# %%
+
+# Ruta del archivo Excel con las hojas
+output_file_path = '/Users/handom/Documents/SIX HSK/pivots_combined.xlsx'
+
+# Cargar las hojas "Total Income" y "Sellout"
+pivot_total_income = pd.read_excel(output_file_path, sheet_name='Total Income')
+pivot_sellout = pd.read_excel(output_file_path, sheet_name='Sellout')
+
+# Asegúrate de que ambos dataFrames tienen la columna 'Concat'
+if 'Concat' not in data.columns:
+    print("La columna 'Concat' no existe en el dataFrame 'data'.")
+if 'Concat' not in pivot_total_income.columns:
+    print("La columna 'Concat' no existe en el dataFrame 'pivot_total_income'.")
+if 'Concat' not in pivot_sellout.columns:
+    print("La columna 'Concat' no existe en el dataFrame 'pivot_sellout'.")
+
+# Realizar el primer merge con "Total Income"
+data = data.merge(pivot_total_income, how='left', on='Concat')
+data.drop(columns=['Año_Comision','Mes_x','No.SAPDENEGOCIO'], inplace=True)
+
+# Realizar el segundo merge con "Sellout"
+data = data.merge(pivot_sellout, how='left', on='Concat')
+# Cambiar el nombre de la columna 'Año_x' a 'Año' en el DataFrame 'data'
+data.rename(columns={'Año_x': 'Año'}, inplace=True)
+
+# Reemplazar valores NaN con 0 en las columnas 'Total Income' y 'Vol_Sellout'
+data[['Total Income', 'Vol_Sellout']] = data[['Total Income', 'Vol_Sellout']].fillna(0)
+
+data.drop(columns=['Año_y',	'MES PL','CECO'], inplace=True)
+data.to_excel('/Users/handom/Documents/SIX HSK/Data_Pivots_HSK.xlsx', index=False)
+
+# %% [markdown]
+# # Rotacion, OP, SellOut, GP Beer y Total Income
+
+# %%
+# Crear un único objeto ExcelWriter para escribir todas las hojas en el mismo archivo
+output_file = 'pivots_combined.xlsx'
+with pd.ExcelWriter(output_file) as writer:
+    # Pivot 1: Turnover HSK
+    pivots = []
+    
+    unique_combinations = data[['Año', 'Wave']].drop_duplicates()
+    
+    mes_order = list(range(1, 13))
+    region_order = ['NW', 'NE', 'WE', 'CE', 'SE']
+    for _, row in unique_combinations.iterrows():
+        año = row['Año']
+        tipo = row['Wave']
+        filtered_data = data[(data['Año'] == año) & (data['Wave'] == tipo)]
+        pivot = pd.pivot_table(
+            filtered_data,
+            values='BAJA',
+            index=['Región', 'GZ SIX'],
+            columns='Mes',
+            aggfunc='sum',
+            fill_value=0
+        )
+        pivot = pivot.reindex(columns=mes_order, fill_value=0)
+        pivot = pivot.reset_index()
+        pivot['Región'] = pd.Categorical(pivot['Región'], categories=region_order, ordered=True)
+        pivot = pivot.sort_values(by=['Región', 'GZ SIX']).set_index(['Región', 'GZ SIX'])
+        pivot.insert(0, 'Año', año)
+        pivot.insert(1, 'Wave', tipo)
+        pivots.append(pivot)
+    combined_pivots = pd.concat(pivots)
+    combined_pivots.to_excel(writer, sheet_name='Turnover_HSK', index=True)
+
+    # Pivot 2: OP Line
+    pivots = []
+    for _, row in unique_combinations.iterrows():
+        año = row['Año']
+        tipo = row['Wave']
+        filtered_data = data[(data['Año'] == año) & (data['Wave'] == tipo)]
+        pivot = pd.pivot_table(
+            filtered_data,
+            values='OP Line',
+            index=['Región', 'GZ SIX'],
+            columns='Mes',
+            aggfunc='sum',
+            fill_value=0
+        )
+        pivot = pivot / 1000000
+        pivot = pivot.reindex(columns=mes_order, fill_value=0)
+        pivot = pivot.reset_index()
+        pivot['Región'] = pd.Categorical(pivot['Región'], categories=region_order, ordered=True)
+        pivot = pivot.sort_values(by=['Región', 'GZ SIX']).set_index(['Región', 'GZ SIX'])
+        pivot.insert(0, 'Año', año)
+        pivot.insert(1, 'Wave', tipo)
+        pivots.append(pivot)
+    combined_pivots = pd.concat(pivots)
+    combined_pivots.to_excel(writer, sheet_name='OP_HSK', index=True)
+
+    # Pivot 3: Vol Sellout
+    pivots = []
+    for _, row in unique_combinations.iterrows():
+        año = row['Año']
+        tipo = row['Wave']
+        filtered_data = data[(data['Año'] == año) & (data['Wave'] == tipo)]
+        pivot_sum = pd.pivot_table(
+            filtered_data,
+            values='Vol_Sellout',
+            index=['Región', 'GZ SIX'],
+            columns='Mes',
+            aggfunc='sum',
+            fill_value=0
+        )
+        pivot_count = pd.pivot_table(
+            filtered_data,
+            values='Vol_Sellout',
+            index=['Región', 'GZ SIX'],
+            columns='Mes',
+            aggfunc='count',
+            fill_value=0
+        )
+        pivot_avg = pivot_sum / pivot_count.replace(0, 1)
+        pivot_avg = pivot_avg.reindex(columns=mes_order, fill_value=0)
+        pivot_avg = pivot_avg.reset_index()
+        pivot_avg['Región'] = pd.Categorical(pivot_avg['Región'], categories=region_order, ordered=True)
+        pivot_avg = pivot_avg.sort_values(by=['Región', 'GZ SIX']).set_index(['Región', 'GZ SIX'])
+        pivot_avg.insert(0, 'Año', año)
+        pivot_avg.insert(1, 'Wave', tipo)
+        pivots.append(pivot_avg)
+    combined_pivots = pd.concat(pivots)
+    combined_pivots.to_excel(writer, sheet_name='Vol_Sellout_Avg_HSK', index=True)
+
+    # Pivot 4: GP Beer
+    pivots = []
+    for _, row in unique_combinations.iterrows():
+        año = row['Año']
+        tipo = row['Wave']
+        filtered_data = data[(data['Año'] == año) & (data['Wave'] == tipo)]
+        
+        # Crear la pivot principal
+        pivot_sum = pd.pivot_table(
+            filtered_data,
+            values='% GP Cerveza',
+            index=['Región', 'GZ SIX'],
+            columns='Mes',
+            aggfunc='mean',
+            fill_value=0
+        )
+        
+        # Reordenar las columnas (meses)
+        pivot_sum = pivot_sum.reindex(columns=mes_order, fill_value=0)
+        
+        # Reordenar las filas (Región) en el orden deseado
+        pivot_sum = pivot_sum.reset_index()
+        pivot_sum['Región'] = pd.Categorical(pivot_sum['Región'], categories=region_order, ordered=True)
+        pivot_sum = pivot_sum.sort_values(by=['Región', 'GZ SIX']).set_index(['Región', 'GZ SIX'])
+        
+        # Agregar identificadores de Año y Wave
+        pivot_sum.insert(0, 'Año', año)
+        pivot_sum.insert(1, 'Wave', tipo)
+        
+        pivots.append(pivot_sum)
+    combined_pivots = pd.concat(pivots)
+    combined_pivots.to_excel(writer, sheet_name='GP Beer HSK', index=True)
+
+    # Pivot 5: Total Income
+    pivots = []
+    for _, row in unique_combinations.iterrows():
+        año = row['Año']
+        tipo = row['Wave']
+        filtered_data = data[(data['Año'] == año) & (data['Wave'] == tipo)]
+        pivot = pd.pivot_table(
+            filtered_data,
+            values='Total Income',
+            index=['Región', 'GZ SIX'],
+            columns='Mes',
+            aggfunc='mean',
+            fill_value=0
+        )
+        pivot = pivot / 1000
+        pivot = pivot.reindex(columns=mes_order, fill_value=0)
+        pivot = pivot.reset_index()
+        pivot['Región'] = pd.Categorical(pivot['Región'], categories=region_order, ordered=True)
+        pivot = pivot.sort_values(by=['Región', 'GZ SIX']).set_index(['Región', 'GZ SIX'])
+        pivot.insert(0, 'Año', año)
+        pivot.insert(1, 'Wave', tipo)
+        pivots.append(pivot)
+    combined_pivots = pd.concat(pivots)
+    combined_pivots.to_excel(writer, sheet_name='Total Income HSK', index=True)
+
+print(f"Pivots guardadas en el archivo: {output_file}")
+
+
+# %% [markdown]
+# # Pivot para presentacion
+# ## las tres olas combinadas
+
+# %%
+import pandas as pd
+from dateutil.relativedelta import relativedelta
+
+# Variable principal (la única que necesitas cambiar)
+fecha_inicio_12m = pd.to_datetime("2025-03-01")
+
+# Calcular fechas derivadas
+fecha_fin_12m = fecha_inicio_12m - relativedelta(months=11)  # 12 meses atrás (incluyendo fecha_inicio_12m)
+fecha_inicio_12m_ly = fecha_inicio_12m - relativedelta(years=1)  # 1 año antes de fecha_inicio_12m
+fecha_fin_12m_ly = fecha_inicio_12m_ly - relativedelta(months=11)  # 12 meses atrás desde fecha_inicio_12m_ly
+
+# Calcular fechas con un mes de offset
+fecha_inicio_12m_offset = fecha_inicio_12m - relativedelta(months=1) 
+fecha_fin_12m_offset = fecha_inicio_12m - relativedelta(months=12)  # 12 meses atrás (incluyendo fecha_inicio_12m)
+fecha_inicio_12m_offset_ly = fecha_inicio_12m - relativedelta(months=13)  # 12 meses atrás desde fecha_inicio_12m
+fecha_fin_12m_offset_ly = fecha_inicio_12m - relativedelta(years=2)  # 1 mes atrás desde fecha_inicio_12m
+
+# Mostrar resultados
+print("fecha_inicio_12m           :", fecha_inicio_12m.strftime("%Y-%m-%d"))
+print("fecha_fin_12m              :", fecha_fin_12m.strftime("%Y-%m-%d"))
+print("fecha_inicio_12m_ly        :", fecha_inicio_12m_ly.strftime("%Y-%m-%d"))
+print("fecha_fin_12m_ly           :", fecha_fin_12m_ly.strftime("%Y-%m-%d"))
+print("fecha_inicio_12m_offset    :", fecha_inicio_12m_offset.strftime("%Y-%m-%d"))
+print("fecha_fin_12m_offset       :", fecha_fin_12m_offset.strftime("%Y-%m-%d"))
+print("fecha_inicio_12m_offset_ly :", fecha_inicio_12m_offset_ly.strftime("%Y-%m-%d"))
+print("fecha_fin_12m_offset_ly    :", fecha_fin_12m_offset_ly.strftime("%Y-%m-%d"))
+
+# Filtrar los últimos 12 meses
+data_ultimos_12m = data[(data['Fecha'] >= fecha_fin_12m) & (data['Fecha'] <= fecha_inicio_12m)]
+
+# Filtrar los mismos 12 meses del año anterior
+data_12m_ly = data[(data['Fecha'] >= fecha_fin_12m_ly) & (data['Fecha'] <= fecha_inicio_12m_ly)]
+
+# Filtrar 12 meses del año anterior offset
+data_12m_offset = data[(data['Fecha'] >= fecha_fin_12m_offset) & (data['Fecha'] <= fecha_inicio_12m_offset)]
+
+# Filtrar 12 meses del año anterior ly offset
+data_12m_offset_ly = data[(data['Fecha'] >= fecha_fin_12m_offset_ly) & (data['Fecha'] <= fecha_inicio_12m_offset_ly)]
+
+# Orden personalizado para las regiones
+region_order = ['NW', 'NE', 'WE', 'CE', 'SE']
+
+# Crear un único objeto ExcelWriter para escribir todas las hojas en el mismo archivo
+output_file = 'pivots_comparativa_12m.xlsx'
+with pd.ExcelWriter(output_file) as writer:
+
+    # Función para calcular promedios por región y agregar la fila "SIX"
+    def calcular_promedio(data, value_column, column_name):
+        if value_column not in data.columns:
+            print(f"Advertencia: La columna '{value_column}' no existe en el DataFrame.")
+            return pd.DataFrame()
+
+        # Calcular el promedio por región
+        pivot = data.groupby('Región')[value_column].mean().reset_index()
+        pivot.rename(columns={value_column: column_name}, inplace=True)
+        return pivot
+
+    # Calcular promedios para los últimos 12 meses
+    pivot_turnover_12m = calcular_promedio(data_ultimos_12m, 'BAJA', 'Turnover_12M')
+    pivot_total_income_12m = calcular_promedio(data_ultimos_12m, 'Total Income', 'Total_Income_12M')
+    # Calcular promedios para los últimos 12 meses offset
+    pivot_op_12m = calcular_promedio(data_12m_offset, 'OP Line', 'OP_12M')
+    pivot_vol_sellout_12m = calcular_promedio(data_12m_offset, 'Vol_Sellout', 'Vol_Sellout_12M')
+    pivot_gp_beer_12m = calcular_promedio(data_12m_offset, '% GP Cerveza', 'GP_Beer_12M')
+
+    # Calcular promedios para los mismos 12 meses del año anterior
+    pivot_turnover_12m_ly = calcular_promedio(data_12m_ly, 'BAJA', 'Turnover_12M_LY')
+    pivot_total_income_12m_ly = calcular_promedio(data_12m_ly, 'Total Income', 'Total_Income_12M_LY')
+    # Calcular promedios para los mismos 12 meses del año anterior offset
+    pivot_op_12m_ly = calcular_promedio(data_12m_offset_ly, 'OP Line', 'OP_12M_LY')
+    pivot_vol_sellout_12m_ly = calcular_promedio(data_12m_offset_ly, 'Vol_Sellout', 'Vol_Sellout_12M_LY')
+    pivot_gp_beer_12m_ly = calcular_promedio(data_12m_offset_ly, '% GP Cerveza', 'GP_Beer_12M_LY')
+
+    # Combinar los promedios en una sola tabla
+    combined_pivots = pivot_turnover_12m.merge(pivot_turnover_12m_ly, on='Región', how='outer') \
+        .merge(pivot_op_12m, on='Región', how='outer') \
+        .merge(pivot_op_12m_ly, on='Región', how='outer') \
+        .merge(pivot_vol_sellout_12m, on='Región', how='outer') \
+        .merge(pivot_vol_sellout_12m_ly, on='Región', how='outer') \
+        .merge(pivot_gp_beer_12m, on='Región', how='outer') \
+        .merge(pivot_gp_beer_12m_ly, on='Región', how='outer') \
+        .merge(pivot_total_income_12m, on='Región', how='outer') \
+        .merge(pivot_total_income_12m_ly, on='Región', how='outer')
+
+    # Crear la fila "SIX" como promedio de las filas existentes
+    numeric_columns = combined_pivots.select_dtypes(include='number').columns
+    six_row = combined_pivots[numeric_columns].mean()  # Promedio de las columnas numéricas
+    six_row['Región'] = 'SIX'  # Asignar el valor "SIX" a la columna Región
+    combined_pivots = pd.concat([combined_pivots, pd.DataFrame([six_row])], ignore_index=True)
+    
+    # Calcular la variación porcentual
+    combined_pivots['Turnover_Var_%'] = (
+        (combined_pivots['Turnover_12M'] / combined_pivots['Turnover_12M_LY'] - 1)
+    )
+    combined_pivots["OP_Var_%"] = (combined_pivots["OP_12M"] - combined_pivots["OP_12M_LY"]) / abs(combined_pivots["OP_12M_LY"])
+
+    combined_pivots['Vol_Sellout_Var_%'] = (
+        (combined_pivots['Vol_Sellout_12M'] / combined_pivots['Vol_Sellout_12M_LY'] - 1)
+    )
+    combined_pivots['GP_Beer_Var_%'] = (
+        (combined_pivots['GP_Beer_12M'] / combined_pivots['GP_Beer_12M_LY'] - 1)
+    )
+    combined_pivots['Total_Income_Var_%'] = (
+        (combined_pivots['Total_Income_12M'] / combined_pivots['Total_Income_12M_LY'] - 1)
+    )
+
+    # Reordenar columnas
+    column_order = [
+        'Región',
+        'Turnover_12M_LY', 'Turnover_12M', 'Turnover_Var_%',
+        'OP_12M_LY', 'OP_12M', 'OP_Var_%',
+        'Vol_Sellout_12M_LY', 'Vol_Sellout_12M', 'Vol_Sellout_Var_%',
+        'GP_Beer_12M_LY', 'GP_Beer_12M', 'GP_Beer_Var_%',
+        'Total_Income_12M_LY', 'Total_Income_12M', 'Total_Income_Var_%'
+    ]
+    combined_pivots = combined_pivots[column_order]
+
+    # Aplicar el orden personalizado para las regiones
+    region_order = ['NW', 'NE', 'WE', 'CE', 'SE', 'SIX']
+    combined_pivots['Región'] = pd.Categorical(
+        combined_pivots['Región'], categories=region_order, ordered=True
+    )
+    combined_pivots = combined_pivots.sort_values('Región')
+
+    # Exportar a Excel
+    combined_pivots.to_excel(writer, sheet_name='Comparativa_12M', index=False)
+
+print(f"Pivots comparativas guardadas en el archivo: {output_file}")
+
+# %% [markdown]
+# ## Resultados 12 meses por Ola 
+# 
+
+# %% [markdown]
+# 
+
+# %%
+import pandas as pd
+from dateutil.relativedelta import relativedelta
+
+# Variable principal (la única que necesitas cambiar)
+fecha_inicio_12m = pd.to_datetime("2025-03-01")
+
+# Calcular fechas derivadas
+fecha_fin_12m = fecha_inicio_12m - relativedelta(months=11)  # 12 meses atrás (incluyendo fecha_inicio_12m)
+fecha_inicio_12m_ly = fecha_inicio_12m - relativedelta(years=1)  # 1 año antes de fecha_inicio_12m
+fecha_fin_12m_ly = fecha_inicio_12m_ly - relativedelta(months=11)  # 12 meses atrás desde fecha_inicio_12m_ly
+
+# Calcular fechas con un mes de offset
+fecha_inicio_12m_offset = fecha_inicio_12m - relativedelta(months=1) 
+fecha_fin_12m_offset = fecha_inicio_12m - relativedelta(months=12)  # 12 meses atrás (incluyendo fecha_inicio_12m)
+fecha_inicio_12m_offset_ly = fecha_inicio_12m - relativedelta(months=13)  # 12 meses atrás desde fecha_inicio_12m
+fecha_fin_12m_offset_ly = fecha_inicio_12m - relativedelta(years=2)  # 1 mes atrás desde fecha_inicio_12m
+
+# Mostrar resultados
+print("fecha_inicio_12m           :", fecha_inicio_12m.strftime("%Y-%m-%d"))
+print("fecha_fin_12m              :", fecha_fin_12m.strftime("%Y-%m-%d"))
+print("fecha_inicio_12m_ly        :", fecha_inicio_12m_ly.strftime("%Y-%m-%d"))
+print("fecha_fin_12m_ly           :", fecha_fin_12m_ly.strftime("%Y-%m-%d"))
+print("fecha_inicio_12m_offset    :", fecha_inicio_12m_offset.strftime("%Y-%m-%d"))
+print("fecha_fin_12m_offset       :", fecha_fin_12m_offset.strftime("%Y-%m-%d"))
+print("fecha_inicio_12m_offset_ly :", fecha_inicio_12m_offset_ly.strftime("%Y-%m-%d"))
+print("fecha_fin_12m_offset_ly    :", fecha_fin_12m_offset_ly.strftime("%Y-%m-%d"))
+
+# Orden personalizado para las regiones
+region_order = ['NW', 'NE', 'WE', 'CE', 'SE', 'SIX']
+
+# Crear un único objeto ExcelWriter para escribir todas las hojas en el mismo archivo
+output_file = 'pivots_comparativa_12m.xlsx'
+with pd.ExcelWriter(output_file) as writer:
+
+    # Iterar sobre cada valor único de la columna 'Wave'
+    for wave in data['Wave'].dropna().unique():
+        print(f"Procesando Wave: {wave}")
+        
+        # Filtrar el DataFrame por el valor actual de 'Wave'
+        data_wave = data[data['Wave'] == wave]
+
+        # Filtrar los últimos 12 meses
+        data_ultimos_12m = data_wave[(data_wave['Fecha'] >= fecha_fin_12m) & (data_wave['Fecha'] <= fecha_inicio_12m)]
+
+        # Filtrar los mismos 12 meses del año anterior
+        data_12m_ly = data_wave[(data_wave['Fecha'] >= fecha_fin_12m_ly) & (data_wave['Fecha'] <= fecha_inicio_12m_ly)]
+
+        # Filtrar 12 meses del año anterior offset
+        data_12m_offset = data_wave[(data_wave['Fecha'] >= fecha_fin_12m_offset) & (data_wave['Fecha'] <= fecha_inicio_12m_offset)]
+
+        # Filtrar 12 meses del año anterior ly offset
+        data_12m_offset_ly = data_wave[(data_wave['Fecha'] >= fecha_fin_12m_offset_ly) & (data_wave['Fecha'] <= fecha_inicio_12m_offset_ly)]
+
+        # Función para calcular promedios por región y agregar la fila "SIX"
+        def calcular_promedio(data, value_column, column_name):
+            if value_column not in data.columns:
+                print(f"Advertencia: La columna '{value_column}' no existe en el DataFrame.")
+                return pd.DataFrame()
+
+            # Calcular el promedio por región
+            pivot = data.groupby('Región')[value_column].mean().reset_index()
+            pivot.rename(columns={value_column: column_name}, inplace=True)
+            return pivot
+
+        # Calcular promedios para los últimos 12 meses
+        pivot_turnover_12m = calcular_promedio(data_ultimos_12m, 'BAJA', 'Turnover_12M')
+        pivot_total_income_12m = calcular_promedio(data_ultimos_12m, 'Total Income', 'Total_Income_12M')
+        # Calcular promedios para los últimos 12 meses offset
+        pivot_op_12m = calcular_promedio(data_12m_offset, 'OP Line', 'OP_12M')
+        pivot_vol_sellout_12m = calcular_promedio(data_12m_offset, 'Vol_Sellout', 'Vol_Sellout_12M')
+        pivot_gp_beer_12m = calcular_promedio(data_12m_offset, '% GP Cerveza', 'GP_Beer_12M')
+
+        # Calcular promedios para los mismos 12 meses del año anterior
+        pivot_turnover_12m_ly = calcular_promedio(data_12m_ly, 'BAJA', 'Turnover_12M_LY')
+        pivot_total_income_12m_ly = calcular_promedio(data_12m_ly, 'Total Income', 'Total_Income_12M_LY')
+        # Calcular promedios para los mismos 12 meses del año anterior offset
+        pivot_op_12m_ly = calcular_promedio(data_12m_offset_ly, 'OP Line', 'OP_12M_LY')
+        pivot_vol_sellout_12m_ly = calcular_promedio(data_12m_offset_ly, 'Vol_Sellout', 'Vol_Sellout_12M_LY')
+        pivot_gp_beer_12m_ly = calcular_promedio(data_12m_offset_ly, '% GP Cerveza', 'GP_Beer_12M_LY')
+
+        # Combinar los promedios en una sola tabla
+        combined_pivots = pivot_turnover_12m.merge(pivot_turnover_12m_ly, on='Región', how='outer') \
+            .merge(pivot_op_12m, on='Región', how='outer') \
+            .merge(pivot_op_12m_ly, on='Región', how='outer') \
+            .merge(pivot_vol_sellout_12m, on='Región', how='outer') \
+            .merge(pivot_vol_sellout_12m_ly, on='Región', how='outer') \
+            .merge(pivot_gp_beer_12m, on='Región', how='outer') \
+            .merge(pivot_gp_beer_12m_ly, on='Región', how='outer') \
+            .merge(pivot_total_income_12m, on='Región', how='outer') \
+            .merge(pivot_total_income_12m_ly, on='Región', how='outer')
+
+        # Crear la fila "SIX" como promedio de las filas existentes
+        numeric_columns = combined_pivots.select_dtypes(include='number').columns
+        six_row = combined_pivots[numeric_columns].mean()  # Promedio de las columnas numéricas
+        six_row['Región'] = 'SIX'  # Asignar el valor "SIX" a la columna Región
+        combined_pivots = pd.concat([combined_pivots, pd.DataFrame([six_row])], ignore_index=True)
+
+        # Calcular la variación porcentual
+        combined_pivots['Turnover_Var_%'] = (
+            (combined_pivots['Turnover_12M'] / combined_pivots['Turnover_12M_LY'] - 1)
+        )
+        combined_pivots["OP_Var_%"] = (combined_pivots["OP_12M"] - combined_pivots["OP_12M_LY"]) / abs(combined_pivots["OP_12M_LY"])
+
+        combined_pivots['Vol_Sellout_Var_%'] = (
+            (combined_pivots['Vol_Sellout_12M'] / combined_pivots['Vol_Sellout_12M_LY'] - 1)
+        )
+        combined_pivots['GP_Beer_Var_%'] = (
+            (combined_pivots['GP_Beer_12M'] / combined_pivots['GP_Beer_12M_LY'] - 1)
+        )
+        combined_pivots['Total_Income_Var_%'] = (
+            (combined_pivots['Total_Income_12M'] / combined_pivots['Total_Income_12M_LY'] - 1)
+        )
+
+        # Reordenar columnas
+        column_order = [
+            'Región',
+            'Turnover_12M_LY', 'Turnover_12M', 'Turnover_Var_%',
+            'OP_12M_LY', 'OP_12M', 'OP_Var_%',
+            'Vol_Sellout_12M_LY', 'Vol_Sellout_12M', 'Vol_Sellout_Var_%',
+            'GP_Beer_12M_LY', 'GP_Beer_12M', 'GP_Beer_Var_%',
+            'Total_Income_12M_LY', 'Total_Income_12M', 'Total_Income_Var_%'
+        ]
+        combined_pivots = combined_pivots[column_order]
+
+        # Aplicar el orden personalizado para las regiones
+        combined_pivots['Región'] = pd.Categorical(
+            combined_pivots['Región'], categories=region_order, ordered=True
+        )
+        combined_pivots = combined_pivots.sort_values('Región')
+
+        # Exportar a Excel en una hoja separada para cada Wave
+        sheet_name = f"Wave_{wave}"
+        combined_pivots.to_excel(writer, sheet_name=sheet_name, index=False)
+
+print(f"Pivots comparativas guardadas en el archivo: {output_file}")
+
+
